@@ -137,6 +137,26 @@ func (ms *MailService) getUserIDFromKey(ctx context.Context, userKey string) (st
 	return profiles[0].UserID, nil
 }
 
+// Define structs for logs and emails
+type LogEntry struct {
+	UserID       string    `json:"user_id"`
+	ServiceID    string    `json:"service_id"`
+	TemplateID   string    `json:"template_id"`
+	Status       string    `json:"status"`
+	Message      string    `json:"message,omitempty"`
+	ErrorMessage string    `json:"error_message,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type EmailEntry struct {
+	UserID       string    `json:"user_id"`
+	ServiceID    string    `json:"service_id"`
+	TemplateID   string    `json:"template_id"`
+	EmailAddress string    `json:"email_address"`
+	Name         string    `json:"name,omitempty"`
+	SentAt       time.Time `json:"sent_at"`
+}
+
 // Modify sendSingleEmail function
 func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, origin string) error {
 	ctx := context.Background()
@@ -251,38 +271,49 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, o
 	)
 
 	if err != nil {
-		logData := map[string]interface{}{
-			"user_id":       userID, // Use resolved userID
-			"service_id":    req.ServiceID,
-			"template_id":   req.TemplateID,
-			"status":        "failed",
-			"error_message": err.Error(),
-			"email_address": recipient.EmailAddress,
-			"created_at":    time.Now(),
+		// Create log entry for failed email
+		logEntry := LogEntry{
+			UserID:       userID,
+			ServiceID:    req.ServiceID,
+			TemplateID:   req.TemplateID,
+			Status:       "failed",
+			ErrorMessage: err.Error(),
+			CreatedAt:    time.Now(),
 		}
-		ms.supaClient.DB.From("logs").Insert(logData).Execute(ctx, nil)
+		// Insert log entry and handle errors
+		if insertErr := ms.supaClient.DB.From("logs").Insert(logEntry).Execute(ctx, nil); insertErr != nil {
+			log.Printf("Failed to insert log entry: %v", insertErr)
+		}
 		return fmt.Errorf("email sending error: %v", err)
 	}
 
-	logData := map[string]interface{}{
-		"user_id":     userID, // Use resolved userID
-		"service_id":  req.ServiceID,
-		"template_id": req.TemplateID,
-		"status":      "success",
-		"message":     fmt.Sprintf("Email sent to %s", recipient.EmailAddress),
-		"created_at":  time.Now(),
+	// Create log entry for successful email
+	logEntry := LogEntry{
+		UserID:     userID,
+		ServiceID:  req.ServiceID,
+		TemplateID: req.TemplateID,
+		Status:     "success",
+		Message:    fmt.Sprintf("Email sent to %s", recipient.EmailAddress),
+		CreatedAt:  time.Now(),
 	}
-	ms.supaClient.DB.From("logs").Insert(logData).Execute(ctx, nil)
+	// Insert log entry and handle errors
+	if insertErr := ms.supaClient.DB.From("logs").Insert(logEntry).Execute(ctx, nil); insertErr != nil {
+		log.Printf("Failed to insert log entry: %v", insertErr)
+	}
 
-	emailData := map[string]interface{}{
-		"user_id":       userID, // Use resolved userID
-		"service_id":    req.ServiceID,
-		"template_id":   req.TemplateID,
-		"email_address": recipient.EmailAddress,
-		"name":          recipient.Name,
-		"sent_at":       time.Now(),
+	// Create email entry
+	emailEntry := EmailEntry{
+		UserID:       userID,
+		ServiceID:    req.ServiceID,
+		TemplateID:   req.TemplateID,
+		EmailAddress: recipient.EmailAddress,
+		Name:         recipient.Name,
+		SentAt:       time.Now(),
 	}
-	ms.supaClient.DB.From("emails").Insert(emailData).Execute(ctx, nil)
+	// Insert email entry and handle errors
+	if insertErr := ms.supaClient.DB.From("emails").Insert(emailEntry).Execute(ctx, nil); insertErr != nil {
+		log.Printf("Failed to insert email entry: %v", insertErr)
+	}
 
 	return nil
 }

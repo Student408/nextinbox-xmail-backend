@@ -20,3 +20,316 @@
 //   - upper: Converts text to uppercase
 //   - lower: Converts text to lowercase
 //   - title: Converts text to title case
+
+
+
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"strings"
+	"sync"
+	"text/template"
+	"time"
+	"net/smtp"
+
+	"github.com/gorilla/mux"
+	"github.com/joho/godotenv"
+	supabase "github.com/lengzuo/supa"
+)
+
+type MailService struct {
+	supaClient *supabase.Client
+	services   map[string]Service
+}
+
+type Service struct {
+	ServiceID   string `json:"service_id"`
+	UserID      string `json:"user_id"`
+	HostAddress string `json:"host_address"`
+	Port        int    `json:"port"`
+	EmailID     string `json:"email_id"`
+	Password    string `json:"password"`
+	CorsOrigin  string `json:"cors_origin"`
+}
+
+type EmailRequest struct {
+	UserKey    string                 `json:"user_key"`
+	ServiceID  string                 `json:"service_id"`
+	TemplateID string                 `json:"template_id"`
+	Recipients []Recipient            `json:"recipients"`
+	Parameters map[string]interface{} `json:"parameters"`
+}
+
+type Recipient struct {
+	EmailAddress string `json:"email_address"`
+	Name         string `json:"name,omitempty"`
+}
+
+type EmailResponse struct {
+	Success bool     `json:"success"`
+	Errors  []string `json:"errors,omitempty"`
+}
+
+func NewMailService() (*MailService, error) {
+	err := godotenv.Load()
+	if err != nil {
+		return nil, fmt.Errorf("error loading .env file: %v", err)
+	}
+
+	conf := supabase.Config{
+		ApiKey:     os.Getenv("SUPABASE_SERVICE_ROLE_KEY"),
+		ProjectRef: os.Getenv("SUPABASE_PROJECT_REF"),
+		Debug:      false,
+	}
+
+	supaClient, err := supabase.New(conf)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize Supabase client: %v", err)
+	}
+
+	return &MailService{
+		supaClient: supaClient,
+		services:   make(map[string]Service),
+	}, nil
+}
+
+func (ms *MailService) SendEmailsHandler(w http.ResponseWriter, r *http.Request) {
+	var req EmailRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	origin := r.Header.Get("Origin")
+	response := EmailResponse{Success: true}
+	var wg sync.WaitGroup
+	errorChan := make(chan error, len(req.Recipients))
+
+	for _, recipient := range req.Recipients {
+		wg.Add(1)
+		go func(rec Recipient) {
+			defer wg.Done()
+			if err := ms.sendSingleEmail(&req, rec, origin); err != nil {
+				errorChan <- fmt.Errorf("error sending to %s: %v", rec.EmailAddress, err)
+			}
+		}(recipient)
+	}
+
+	go func() {
+		wg.Wait()
+		close(errorChan)
+	}()
+
+	for err := range errorChan {
+		response.Success = false
+		response.Errors = append(response.Errors, err.Error())
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+func (ms *MailService) getUserIDFromKey(ctx context.Context, userKey string) (string, error) {
+	var profiles []struct {
+		UserID string `json:"user_id"`
+	}
+
+	err := ms.supaClient.DB.From("profile").
+		Select("user_id").
+		Eq("user_key", userKey).
+		Execute(ctx, &profiles)
+
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch profile: %v", err)
+	}
+
+	if len(profiles) == 0 {
+		return "", fmt.Errorf("no profile found for user_key: %s", userKey)
+	}
+
+	return profiles[0].UserID, nil
+}
+
+func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, origin string) error {
+    ctx := context.Background()
+
+    userID, err := ms.getUserIDFromKey(ctx, req.UserKey)
+    if err != nil {
+        return fmt.Errorf("failed to get user_id: %v", err)
+    }
+
+    var services []Service
+    err = ms.supaClient.DB.From("services").
+        Select("*").
+        Eq("service_id", req.ServiceID).
+        Eq("user_id", userID).
+        Execute(ctx, &services)
+    if err != nil || len(services) == 0 {
+        return fmt.Errorf("failed to fetch service: %v", err)
+    }
+
+    service := services[0]
+
+    if service.CorsOrigin != "" {
+        allowedOrigins := strings.Split(service.CorsOrigin, ",")
+        originAllowed := false
+        for _, allowedOrigin := range allowedOrigins {
+            if strings.TrimSpace(allowedOrigin) == origin {
+                originAllowed = true
+                break
+            }
+        }
+        if !originAllowed {
+            return fmt.Errorf("origin not allowed: %s", origin)
+        }
+    }
+
+    if rawDate, ok := req.Parameters["date"].(string); ok {
+        parsedDate, err := time.Parse(time.RFC3339, rawDate)
+        if err != nil {
+            return fmt.Errorf("invalid date format: %v", err)
+        }
+        req.Parameters["date"] = parsedDate
+    }
+
+    var templates []struct {
+        Content string `json:"content"`
+        Subject string `json:"subject"`
+    }
+    err = ms.supaClient.DB.From("templates").
+        Select("content", "subject").
+        Eq("template_id", req.TemplateID).
+        Eq("user_id", userID).
+        Execute(ctx, &templates)
+    if err != nil || len(templates) == 0 {
+        return fmt.Errorf("failed to fetch template: %v", err)
+    }
+
+    tmplData := templates[0]
+
+    funcMap := template.FuncMap{
+        "formatDate": func(t time.Time) string {
+            return t.Format("2006-01-02 15:04:05")
+        },
+        "upper": strings.ToUpper,
+        "lower": strings.ToLower,
+        "title": strings.Title,
+    }
+
+    tmpl, err := template.New("email").Funcs(funcMap).Parse(tmplData.Content)
+    if err != nil {
+        return fmt.Errorf("template parsing error: %v", err)
+    }
+
+    templateContext := map[string]interface{}{
+        "recipient": recipient,
+        "params":    req.Parameters,
+    }
+
+    var body strings.Builder
+    if err := tmpl.Execute(&body, templateContext); err != nil {
+        return fmt.Errorf("template execution error: %v", err)
+    }
+
+    headers := map[string]string{
+        "MIME-Version":              "1.0",
+        "Content-Type":              "text/html; charset=UTF-8",
+        "Subject":                   tmplData.Subject,
+        "From":                      service.EmailID,
+        "To":                        recipient.EmailAddress,
+        "X-Priority":                "3",
+        "X-Mailer":                  "Portfolio Mailer",
+        "Content-Transfer-Encoding": "8bit",
+    }
+
+    var message strings.Builder
+    for key, value := range headers {
+        message.WriteString(fmt.Sprintf("%s: %s\r\n", key, value))
+    }
+    message.WriteString("\r\n")
+    message.WriteString(body.String())
+
+    auth := smtp.PlainAuth("", service.EmailID, service.Password, service.HostAddress)
+    err = smtp.SendMail(
+        fmt.Sprintf("%s:%d", service.HostAddress, service.Port),
+        auth,
+        service.EmailID,
+        []string{recipient.EmailAddress},
+        []byte(message.String()),
+    )
+
+    // Log entry creation
+    logData := map[string]interface{}{
+        "user_id":       userID,
+        "service_id":    req.ServiceID,
+        "template_id":   req.TemplateID,
+        "email_address": recipient.EmailAddress,
+        "created_at":    time.Now(),
+    }
+
+    if err != nil {
+        logData["status"] = "failed"
+        logData["error_message"] = err.Error()
+        
+        var logResult interface{}
+        if logErr := ms.supaClient.DB.From("logs").Insert(logData).Execute(ctx, &logResult); logErr != nil {
+            return fmt.Errorf("email sending failed: %v, log entry failed: %v", err, logErr)
+        }
+        return fmt.Errorf("email sending failed: %v", err)
+    }
+
+    logData["status"] = "success"
+    logData["message"] = fmt.Sprintf("Email sent to %s", recipient.EmailAddress)
+    
+    var logResult interface{}
+    if logErr := ms.supaClient.DB.From("logs").Insert(logData).Execute(ctx, &logResult); logErr != nil {
+        return fmt.Errorf("email sent but log entry failed: %v", logErr)
+    }
+
+    // Email record creation
+    emailData := map[string]interface{}{
+        "user_id":       userID,
+        "service_id":    req.ServiceID,
+        "template_id":   req.TemplateID,
+        "email_address": recipient.EmailAddress,
+        "name":          recipient.Name,
+        "sent_at":       time.Now(),
+    }
+
+    var emailResult interface{}
+    if emailErr := ms.supaClient.DB.From("emails").Insert(emailData).Execute(ctx, &emailResult); emailErr != nil {
+        return fmt.Errorf("email sent but email record creation failed: %v", emailErr)
+    }
+
+    return nil
+}
+
+func (ms *MailService) HealthCheckHandler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func main() {
+	mailService, err := NewMailService()
+	if err != nil {
+		log.Fatalf("Failed to initialize mail service: %v", err)
+	}
+
+	r := mux.NewRouter()
+	r.HandleFunc("/send-emails", mailService.SendEmailsHandler).Methods("POST")
+	r.HandleFunc("/health", mailService.HealthCheckHandler).Methods("GET")
+
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	log.Printf("Server starting on port %s", port)
+	log.Fatal(http.ListenAndServe(":"+port, r))
+}
