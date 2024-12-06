@@ -31,6 +31,7 @@ type Service struct {
 	Port        int    `json:"port"`
 	EmailID     string `json:"email_id"`
 	Password    string `json:"password"`
+	CorsOrigin  string `json:"cors_origin"` // Add CorsOrigin field
 }
 
 // Update the EmailRequest struct
@@ -82,6 +83,9 @@ func (ms *MailService) SendEmailsHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Get the Origin header from the incoming request
+	origin := r.Header.Get("Origin")
+
 	response := EmailResponse{Success: true}
 	var wg sync.WaitGroup
 	errorChan := make(chan error, len(req.Recipients))
@@ -90,7 +94,8 @@ func (ms *MailService) SendEmailsHandler(w http.ResponseWriter, r *http.Request)
 		wg.Add(1)
 		go func(rec Recipient) {
 			defer wg.Done()
-			if err := ms.sendSingleEmail(&req, rec); err != nil {
+			// Pass the origin to sendSingleEmail
+			if err := ms.sendSingleEmail(&req, rec, origin); err != nil {
 				errorChan <- fmt.Errorf("error sending to %s: %v", rec.EmailAddress, err)
 			}
 		}(recipient)
@@ -133,7 +138,7 @@ func (ms *MailService) getUserIDFromKey(ctx context.Context, userKey string) (st
 }
 
 // Modify sendSingleEmail function
-func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient) error {
+func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, origin string) error {
 	ctx := context.Background()
 
 	// First get the user_id from user_key
@@ -152,6 +157,23 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient) e
 		return fmt.Errorf("failed to fetch service: %v", err)
 	}
 
+	service := services[0]
+
+	// Check if the request's origin is allowed
+	if service.CorsOrigin != "" {
+		allowedOrigins := strings.Split(service.CorsOrigin, ",")
+		originAllowed := false
+		for _, allowedOrigin := range allowedOrigins {
+			if strings.TrimSpace(allowedOrigin) == origin {
+				originAllowed = true
+				break
+			}
+		}
+		if !originAllowed {
+			return fmt.Errorf("origin not allowed: %s", origin)
+		}
+	}
+
 	if rawDate, ok := req.Parameters["date"].(string); ok {
 		parsedDate, err := time.Parse(time.RFC3339, rawDate)
 		if err != nil {
@@ -159,8 +181,6 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient) e
 		}
 		req.Parameters["date"] = parsedDate
 	}
-
-	service := services[0]
 
 	var templates []struct {
 		Content string `json:"content"`
