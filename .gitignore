@@ -1,0 +1,49 @@
+# Binaries for programs and plugins
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Build output
+*.out
+
+# Go workspace and modules
+vendor/
+*.mod
+*.sum
+
+# IDE and editor config files
+.idea/
+*.iml
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Logs
+*.log
+
+# Coverage files
+*.cover
+*.cov
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.old
+
+# Debugging files
+*.test
+*.prof
+*.trace
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.*
