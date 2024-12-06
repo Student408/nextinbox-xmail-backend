@@ -1,0 +1,22 @@
+// sendSingleEmail sends an email to a single recipient using the specified email service and template.
+// It performs the following steps:
+//  1. Fetches the email service configuration from the database
+//  2. Parses any date parameters in RFC3339 format
+//  3. Retrieves the email template from the database
+//  4. Executes the template with recipient data and parameters
+//  5. Constructs and sends the email via SMTP
+//  6. Logs the email sending attempt and outcome
+//  7. Records the sent email in the emails table
+//
+// Parameters:
+//   - req: Email request containing service ID, template ID, user ID and parameters
+//   - recipient: Recipient details including email address and name
+//
+// Returns:
+//   - error: nil if successful, otherwise an error describing what went wrong
+//
+// The function supports template functions including:
+//   - formatDate: Formats time.Time as "2006-01-02 15:04:05"
+//   - upper: Converts text to uppercase
+//   - lower: Converts text to lowercase
+//   - title: Converts text to title case

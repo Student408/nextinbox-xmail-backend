@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -10,8 +11,6 @@ import (
 	"sync"
 	"text/template"
 	"time"
-
-	"fmt"
 
 	"net/smtp"
 
@@ -32,17 +31,11 @@ type Service struct {
 	Port        int    `json:"port"`
 	EmailID     string `json:"email_id"`
 	Password    string `json:"password"`
-	CorsOrigin  string `json:"cors_origin"`
 }
 
-type Profile struct {
-	ProfileID string `json:"profile_id"`
-	UserID    string `json:"user_id"`
-	UserKey   string `json:"user_key"`
-}
-
+// Update the EmailRequest struct
 type EmailRequest struct {
-	UserKey    string                 `json:"user_key"`
+	UserKey    string                 `json:"user_key"` // Changed from UserID
 	ServiceID  string                 `json:"service_id"`
 	TemplateID string                 `json:"template_id"`
 	Recipients []Recipient            `json:"recipients"`
@@ -117,53 +110,47 @@ func (ms *MailService) SendEmailsHandler(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(response)
 }
 
-// sendSingleEmail sends an email to a single recipient using the specified email service and template.
-// It performs the following steps:
-//  1. Fetches the email service configuration from the database
-//  2. Parses any date parameters in RFC3339 format
-//  3. Retrieves the email template from the database
-//  4. Executes the template with recipient data and parameters
-//  5. Constructs and sends the email via SMTP
-//  6. Logs the email sending attempt and outcome
-//  7. Records the sent email in the emails table
-//
-// Parameters:
-//   - req: Email request containing service ID, template ID, user ID and parameters
-//   - recipient: Recipient details including email address and name
-//
-// Returns:
-//   - error: nil if successful, otherwise an error describing what went wrong
-//
-// The function supports template functions including:
-//   - formatDate: Formats time.Time as "2006-01-02 15:04:05"
-//   - upper: Converts text to uppercase
-//   - lower: Converts text to lowercase
-//   - title: Converts text to title case
+// Add new function to get user_id from user_key
+func (ms *MailService) getUserIDFromKey(ctx context.Context, userKey string) (string, error) {
+	var profiles []struct {
+		UserID string `json:"user_id"`
+	}
+
+	err := ms.supaClient.DB.From("profile").
+		Select("user_id").
+		Eq("user_key", userKey).
+		Execute(ctx, &profiles)
+
+	if err != nil {
+		return "", fmt.Errorf("failed to fetch profile: %v", err)
+	}
+
+	if len(profiles) == 0 {
+		return "", fmt.Errorf("no profile found for user_key: %s", userKey)
+	}
+
+	return profiles[0].UserID, nil
+}
+
+// Modify sendSingleEmail function
 func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient) error {
 	ctx := context.Background()
 
-	// First get UserID from profile using UserKey
-	var profiles []Profile
-	err := ms.supaClient.DB.From("profile").
-		Select("*").
-		Eq("user_key", req.UserKey).
-		Execute(ctx, &profiles)
-	if err != nil || len(profiles) == 0 {
-		return fmt.Errorf("invalid user key: %v", err)
+	// First get the user_id from user_key
+	userID, err := ms.getUserIDFromKey(ctx, req.UserKey)
+	if err != nil {
+		return fmt.Errorf("failed to get user_id: %v", err)
 	}
-	userID := profiles[0].UserID
 
-	// Then get service using UserID
 	var services []Service
 	err = ms.supaClient.DB.From("services").
 		Select("*").
 		Eq("service_id", req.ServiceID).
-		Eq("user_id", userID).
+		Eq("user_id", userID). // Use resolved userID
 		Execute(ctx, &services)
 	if err != nil || len(services) == 0 {
 		return fmt.Errorf("failed to fetch service: %v", err)
 	}
-	service := services[0]
 
 	if rawDate, ok := req.Parameters["date"].(string); ok {
 		parsedDate, err := time.Parse(time.RFC3339, rawDate)
@@ -173,6 +160,8 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient) e
 		req.Parameters["date"] = parsedDate
 	}
 
+	service := services[0]
+
 	var templates []struct {
 		Content string `json:"content"`
 		Subject string `json:"subject"`
@@ -180,7 +169,7 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient) e
 	err = ms.supaClient.DB.From("templates").
 		Select("content", "subject").
 		Eq("template_id", req.TemplateID).
-		Eq("user_id", userID).
+		Eq("user_id", userID). // Use resolved userID
 		Execute(ctx, &templates)
 	if err != nil || len(templates) == 0 {
 		return fmt.Errorf("failed to fetch template: %v", err)
@@ -243,7 +232,7 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient) e
 
 	if err != nil {
 		logData := map[string]interface{}{
-			"user_id":       userID,
+			"user_id":       userID, // Use resolved userID
 			"service_id":    req.ServiceID,
 			"template_id":   req.TemplateID,
 			"status":        "failed",
@@ -256,7 +245,7 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient) e
 	}
 
 	logData := map[string]interface{}{
-		"user_id":     userID,
+		"user_id":     userID, // Use resolved userID
 		"service_id":  req.ServiceID,
 		"template_id": req.TemplateID,
 		"status":      "success",
@@ -266,7 +255,7 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient) e
 	ms.supaClient.DB.From("logs").Insert(logData).Execute(ctx, nil)
 
 	emailData := map[string]interface{}{
-		"user_id":       userID,
+		"user_id":       userID, // Use resolved userID
 		"service_id":    req.ServiceID,
 		"template_id":   req.TemplateID,
 		"email_address": recipient.EmailAddress,
@@ -283,32 +272,6 @@ func (ms *MailService) HealthCheckHandler(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
-// Add CORS middleware
-func corsMiddleware(service *Service, next http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if service.CorsOrigin == "" {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		if origin := r.Header.Get("Origin"); origin != service.CorsOrigin {
-			http.Error(w, "Invalid origin", http.StatusForbidden)
-			return
-		}
-
-		w.Header().Set("Access-Control-Allow-Origin", service.CorsOrigin)
-		w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	}
-}
-
 func main() {
 	mailService, err := NewMailService()
 	if err != nil {
@@ -317,38 +280,10 @@ func main() {
 
 	r := mux.NewRouter()
 
-	// Get service for CORS configuration
-	r.HandleFunc("/send-emails", func(w http.ResponseWriter, r *http.Request) {
-		var req EmailRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
+	// Email sending endpoint
+	r.HandleFunc("/send-emails", mailService.SendEmailsHandler).Methods("POST")
 
-		ctx := context.Background()
-		var profiles []Profile
-		err := mailService.supaClient.DB.From("profile").
-			Select("*").
-			Eq("user_key", req.UserKey).
-			Execute(ctx, &profiles)
-		if err != nil || len(profiles) == 0 {
-			http.Error(w, "Invalid user key", http.StatusUnauthorized)
-			return
-		}
-
-		var services []Service
-		err = mailService.supaClient.DB.From("services").
-			Select("*").
-			Eq("service_id", req.ServiceID).
-			Execute(ctx, &services)
-		if err != nil || len(services) == 0 {
-			http.Error(w, "Service not found", http.StatusNotFound)
-			return
-		}
-
-		corsMiddleware(&services[0], mailService.SendEmailsHandler).ServeHTTP(w, r)
-	}).Methods("POST")
-
+	// Health check endpoint
 	r.HandleFunc("/health", mailService.HealthCheckHandler).Methods("GET")
 
 	port := os.Getenv("PORT")
