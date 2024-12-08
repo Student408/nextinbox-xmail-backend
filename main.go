@@ -18,6 +18,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 	supabase "github.com/lengzuo/supa"
+	"github.com/rs/cors"
 )
 
 type MailService struct {
@@ -381,6 +382,30 @@ func (ms *MailService) HealthCheckHandler(w http.ResponseWriter, r *http.Request
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
 
+func (ms *MailService) IsOriginAllowed(origin string) bool {
+	ctx := context.Background()
+	var services []Service
+	err := ms.supaClient.DB.From("services").
+		Select("cors_origin").
+		Execute(ctx, &services)
+	if err != nil {
+		log.Printf("Failed to fetch services: %v", err)
+		return false
+	}
+	for _, service := range services {
+		if service.CorsOrigin != "" {
+			origins := strings.Split(service.CorsOrigin, ",")
+			for _, o := range origins {
+				o = strings.TrimSpace(o)
+				if o == origin {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
 func main() {
 	mailService, err := NewMailService()
 	if err != nil {
@@ -395,11 +420,18 @@ func main() {
 	// Health check endpoint
 	r.HandleFunc("/health", mailService.HealthCheckHandler).Methods("GET")
 
+	c := cors.New(cors.Options{
+		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
+		AllowCredentials: true,
+		AllowedOrigins: []string{"*"}, // Replace with your allowed origins
+	})
+	handler := c.Handler(r)
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
 	log.Printf("Server starting on port %s", port)
-	log.Fatal(http.ListenAndServe(":"+port, r))
+	log.Fatal(http.ListenAndServe(":"+port, handler))
 }
