@@ -139,22 +139,20 @@ func (ms *MailService) getUserIDFromKey(ctx context.Context, userKey string) (st
 
 // Define structs for logs and emails
 type LogEntry struct {
-	UserID       string    `json:"user_id"`
-	ServiceID    string    `json:"service_id"`
-	TemplateID   string    `json:"template_id"`
-	Status       string    `json:"status"`
-	Message      string    `json:"message,omitempty"`
-	ErrorMessage string    `json:"error_message,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	UserID     string `json:"user_id"`
+	ServiceID  string `json:"service_id"`
+	TemplateID string `json:"template_id"`
+	Status     string `json:"status"`
+	Message    string `json:"message,omitempty"`
 }
 
 type EmailEntry struct {
-	UserID       string    `json:"user_id"`
-	ServiceID    string    `json:"service_id"`
-	TemplateID   string    `json:"template_id"`
-	EmailAddress string    `json:"email_address"`
-	Name         string    `json:"name,omitempty"`
-	SentAt       time.Time `json:"sent_at"`
+	UserID       string `json:"user_id"`
+	ServiceID    string `json:"service_id"`
+	TemplateID   string `json:"template_id"`
+	EmailAddress string `json:"email_address"`
+	Name         string `json:"name,omitempty"`
+	PhoneNumber  string `json:"phone_number,omitempty"`
 }
 
 // Modify sendSingleEmail function
@@ -164,7 +162,39 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, o
 	// First get the user_id from user_key
 	userID, err := ms.getUserIDFromKey(ctx, req.UserKey)
 	if err != nil {
-		return fmt.Errorf("failed to get user_id: %v", err)
+		return fmt.Errorf("invalid user_key: %v", err)
+	}
+
+	// Fetch the user's rate_limit from the profile table
+	var profiles []struct {
+		RateLimit int `json:"rate_limit"`
+	}
+	err = ms.supaClient.DB.From("profile").
+		Select("rate_limit").
+		Eq("user_id", userID).
+		Execute(ctx, &profiles)
+	if err != nil || len(profiles) == 0 {
+		return fmt.Errorf("failed to fetch user's rate limit: %v", err)
+	}
+
+	// Check if rate_limit is greater than zero
+	if profiles[0].RateLimit <= 0 {
+		return fmt.Errorf("rate limit exceeded")
+	}
+
+	// Decrement the rate_limit by 1 using a struct instead of a map
+	updatedProfile := struct {
+		RateLimit int `json:"rate_limit"`
+	}{
+		RateLimit: profiles[0].RateLimit - 1,
+	}
+
+	err = ms.supaClient.DB.From("profile").
+		Update(updatedProfile).
+		Eq("user_id", userID).
+		Execute(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("failed to update user's rate limit: %v", err)
 	}
 
 	var services []Service
@@ -174,7 +204,7 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, o
 		Eq("user_id", userID). // Use resolved userID
 		Execute(ctx, &services)
 	if err != nil || len(services) == 0 {
-		return fmt.Errorf("failed to fetch service: %v", err)
+		return fmt.Errorf("invalid service_id")
 	}
 
 	service := services[0]
@@ -212,7 +242,7 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, o
 		Eq("user_id", userID). // Use resolved userID
 		Execute(ctx, &templates)
 	if err != nil || len(templates) == 0 {
-		return fmt.Errorf("failed to fetch template: %v", err)
+		return fmt.Errorf("invalid template_id")
 	}
 
 	tmplData := templates[0]
@@ -262,6 +292,8 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, o
 	message.WriteString(body.String())
 
 	auth := smtp.PlainAuth("", service.EmailID, service.Password, service.HostAddress)
+
+	// Attempt to send the email
 	err = smtp.SendMail(
 		fmt.Sprintf("%s:%d", service.HostAddress, service.Port),
 		auth,
@@ -270,49 +302,53 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, o
 		[]byte(message.String()),
 	)
 
-	if err != nil {
-		// Create log entry for failed email
-		logEntry := LogEntry{
-			UserID:       userID,
-			ServiceID:    req.ServiceID,
-			TemplateID:   req.TemplateID,
-			Status:       "failed",
-			ErrorMessage: err.Error(),
-			CreatedAt:    time.Now(),
-		}
-		// Insert log entry and handle errors
-		if insertErr := ms.supaClient.DB.From("logs").Insert(logEntry).Execute(ctx, nil); insertErr != nil {
-			log.Printf("Failed to insert log entry: %v", insertErr)
-		}
-		return fmt.Errorf("email sending error: %v", err)
-	}
-
-	// Create log entry for successful email
+	// Create log entry regardless of success or failure
 	logEntry := LogEntry{
 		UserID:     userID,
 		ServiceID:  req.ServiceID,
 		TemplateID: req.TemplateID,
 		Status:     "success",
 		Message:    fmt.Sprintf("Email sent to %s", recipient.EmailAddress),
-		CreatedAt:  time.Now(),
 	}
+	if err != nil {
+		// If sending email failed, set status to "failed" and include the error message
+		logEntry.Status = "failed"
+		logEntry.Message = err.Error()
+	}
+
 	// Insert log entry and handle errors
 	if insertErr := ms.supaClient.DB.From("logs").Insert(logEntry).Execute(ctx, nil); insertErr != nil {
 		log.Printf("Failed to insert log entry: %v", insertErr)
 	}
 
-	// Create email entry
-	emailEntry := EmailEntry{
-		UserID:       userID,
-		ServiceID:    req.ServiceID,
-		TemplateID:   req.TemplateID,
-		EmailAddress: recipient.EmailAddress,
-		Name:         recipient.Name,
-		SentAt:       time.Now(),
+	if err != nil {
+		return fmt.Errorf("email sending error: %v", err)
 	}
-	// Insert email entry and handle errors
-	if insertErr := ms.supaClient.DB.From("emails").Insert(emailEntry).Execute(ctx, nil); insertErr != nil {
-		log.Printf("Failed to insert email entry: %v", insertErr)
+
+	// Check if the email entry already exists
+	var existingEmails []EmailEntry
+	err = ms.supaClient.DB.From("emails").
+		Select("*").
+		Eq("user_id", userID).
+		Eq("email_address", recipient.EmailAddress).
+		Eq("template_id", req.TemplateID).
+		Execute(ctx, &existingEmails)
+	if err != nil {
+		log.Printf("Failed to check existing emails: %v", err)
+	} else if len(existingEmails) == 0 {
+		// Create email entry since it doesn't exist
+		emailEntry := EmailEntry{
+			UserID:       userID,
+			ServiceID:    req.ServiceID,
+			TemplateID:   req.TemplateID,
+			EmailAddress: recipient.EmailAddress,
+			Name:         recipient.Name,
+			PhoneNumber:  "", // Add PhoneNumber field to match the emails table schema
+		}
+		// Insert email entry and handle errors
+		if insertErr := ms.supaClient.DB.From("emails").Insert(emailEntry).Execute(ctx, nil); insertErr != nil {
+			log.Printf("Failed to insert email entry: %v", insertErr)
+		}
 	}
 
 	return nil

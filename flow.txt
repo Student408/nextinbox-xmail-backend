@@ -1,28 +1,3 @@
-// sendSingleEmail sends an email to a single recipient using the specified email service and template.
-// It performs the following steps:
-//  1. Fetches the email service configuration from the database
-//  2. Parses any date parameters in RFC3339 format
-//  3. Retrieves the email template from the database
-//  4. Executes the template with recipient data and parameters
-//  5. Constructs and sends the email via SMTP
-//  6. Logs the email sending attempt and outcome
-//  7. Records the sent email in the emails table
-//
-// Parameters:
-//   - req: Email request containing service ID, template ID, user ID and parameters
-//   - recipient: Recipient details including email address and name
-//
-// Returns:
-//   - error: nil if successful, otherwise an error describing what went wrong
-//
-// The function supports template functions including:
-//   - formatDate: Formats time.Time as "2006-01-02 15:04:05"
-//   - upper: Converts text to uppercase
-//   - lower: Converts text to lowercase
-//   - title: Converts text to title case
-
-
-
 package main
 
 import (
@@ -36,6 +11,7 @@ import (
 	"sync"
 	"text/template"
 	"time"
+
 	"net/smtp"
 
 	"github.com/gorilla/mux"
@@ -55,11 +31,12 @@ type Service struct {
 	Port        int    `json:"port"`
 	EmailID     string `json:"email_id"`
 	Password    string `json:"password"`
-	CorsOrigin  string `json:"cors_origin"`
+	CorsOrigin  string `json:"cors_origin"` // Add CorsOrigin field
 }
 
+// Update the EmailRequest struct
 type EmailRequest struct {
-	UserKey    string                 `json:"user_key"`
+	UserKey    string                 `json:"user_key"` // Changed from UserID
 	ServiceID  string                 `json:"service_id"`
 	TemplateID string                 `json:"template_id"`
 	Recipients []Recipient            `json:"recipients"`
@@ -106,7 +83,9 @@ func (ms *MailService) SendEmailsHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// Get the Origin header from the incoming request
 	origin := r.Header.Get("Origin")
+
 	response := EmailResponse{Success: true}
 	var wg sync.WaitGroup
 	errorChan := make(chan error, len(req.Recipients))
@@ -115,6 +94,7 @@ func (ms *MailService) SendEmailsHandler(w http.ResponseWriter, r *http.Request)
 		wg.Add(1)
 		go func(rec Recipient) {
 			defer wg.Done()
+			// Pass the origin to sendSingleEmail
 			if err := ms.sendSingleEmail(&req, rec, origin); err != nil {
 				errorChan <- fmt.Errorf("error sending to %s: %v", rec.EmailAddress, err)
 			}
@@ -135,6 +115,7 @@ func (ms *MailService) SendEmailsHandler(w http.ResponseWriter, r *http.Request)
 	json.NewEncoder(w).Encode(response)
 }
 
+// Add new function to get user_id from user_key
 func (ms *MailService) getUserIDFromKey(ctx context.Context, userKey string) (string, error) {
 	var profiles []struct {
 		UserID string `json:"user_id"`
@@ -156,158 +137,185 @@ func (ms *MailService) getUserIDFromKey(ctx context.Context, userKey string) (st
 	return profiles[0].UserID, nil
 }
 
+// Define structs for logs and emails
+type LogEntry struct {
+	UserID       string    `json:"user_id"`
+	ServiceID    string    `json:"service_id"`
+	TemplateID   string    `json:"template_id"`
+	Status       string    `json:"status"`
+	Message      string    `json:"message,omitempty"`
+	ErrorMessage string    `json:"error_message,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type EmailEntry struct {
+	UserID       string    `json:"user_id"`
+	ServiceID    string    `json:"service_id"`
+	TemplateID   string    `json:"template_id"`
+	EmailAddress string    `json:"email_address"`
+	Name         string    `json:"name,omitempty"`
+	SentAt       time.Time `json:"sent_at"`
+}
+
+// Modify sendSingleEmail function
 func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, origin string) error {
-    ctx := context.Background()
+	ctx := context.Background()
 
-    userID, err := ms.getUserIDFromKey(ctx, req.UserKey)
-    if err != nil {
-        return fmt.Errorf("failed to get user_id: %v", err)
-    }
+	// First get the user_id from user_key
+	userID, err := ms.getUserIDFromKey(ctx, req.UserKey)
+	if err != nil {
+		return fmt.Errorf("failed to get user_id: %v", err)
+	}
 
-    var services []Service
-    err = ms.supaClient.DB.From("services").
-        Select("*").
-        Eq("service_id", req.ServiceID).
-        Eq("user_id", userID).
-        Execute(ctx, &services)
-    if err != nil || len(services) == 0 {
-        return fmt.Errorf("failed to fetch service: %v", err)
-    }
+	var services []Service
+	err = ms.supaClient.DB.From("services").
+		Select("*").
+		Eq("service_id", req.ServiceID).
+		Eq("user_id", userID). // Use resolved userID
+		Execute(ctx, &services)
+	if err != nil || len(services) == 0 {
+		return fmt.Errorf("failed to fetch service: %v", err)
+	}
 
-    service := services[0]
+	service := services[0]
 
-    if service.CorsOrigin != "" {
-        allowedOrigins := strings.Split(service.CorsOrigin, ",")
-        originAllowed := false
-        for _, allowedOrigin := range allowedOrigins {
-            if strings.TrimSpace(allowedOrigin) == origin {
-                originAllowed = true
-                break
-            }
-        }
-        if !originAllowed {
-            return fmt.Errorf("origin not allowed: %s", origin)
-        }
-    }
+	// Check if the request's origin is allowed
+	if service.CorsOrigin != "" {
+		allowedOrigins := strings.Split(service.CorsOrigin, ",")
+		originAllowed := false
+		for _, allowedOrigin := range allowedOrigins {
+			if strings.TrimSpace(allowedOrigin) == origin {
+				originAllowed = true
+				break
+			}
+		}
+		if !originAllowed {
+			return fmt.Errorf("origin not allowed: %s", origin)
+		}
+	}
 
-    if rawDate, ok := req.Parameters["date"].(string); ok {
-        parsedDate, err := time.Parse(time.RFC3339, rawDate)
-        if err != nil {
-            return fmt.Errorf("invalid date format: %v", err)
-        }
-        req.Parameters["date"] = parsedDate
-    }
+	if rawDate, ok := req.Parameters["date"].(string); ok {
+		parsedDate, err := time.Parse(time.RFC3339, rawDate)
+		if err != nil {
+			return fmt.Errorf("invalid date format: %v", err)
+		}
+		req.Parameters["date"] = parsedDate
+	}
 
-    var templates []struct {
-        Content string `json:"content"`
-        Subject string `json:"subject"`
-    }
-    err = ms.supaClient.DB.From("templates").
-        Select("content", "subject").
-        Eq("template_id", req.TemplateID).
-        Eq("user_id", userID).
-        Execute(ctx, &templates)
-    if err != nil || len(templates) == 0 {
-        return fmt.Errorf("failed to fetch template: %v", err)
-    }
+	var templates []struct {
+		Content string `json:"content"`
+		Subject string `json:"subject"`
+	}
+	err = ms.supaClient.DB.From("templates").
+		Select("content", "subject").
+		Eq("template_id", req.TemplateID).
+		Eq("user_id", userID). // Use resolved userID
+		Execute(ctx, &templates)
+	if err != nil || len(templates) == 0 {
+		return fmt.Errorf("failed to fetch template: %v", err)
+	}
 
-    tmplData := templates[0]
+	tmplData := templates[0]
 
-    funcMap := template.FuncMap{
-        "formatDate": func(t time.Time) string {
-            return t.Format("2006-01-02 15:04:05")
-        },
-        "upper": strings.ToUpper,
-        "lower": strings.ToLower,
-        "title": strings.Title,
-    }
+	// Create template with function map for additional template functionality
+	funcMap := template.FuncMap{
+		"formatDate": func(t time.Time) string {
+			return t.Format("2006-01-02 15:04:05")
+		},
+		"upper": strings.ToUpper,
+		"lower": strings.ToLower,
+		"title": strings.Title,
+	}
 
-    tmpl, err := template.New("email").Funcs(funcMap).Parse(tmplData.Content)
-    if err != nil {
-        return fmt.Errorf("template parsing error: %v", err)
-    }
+	tmpl, err := template.New("email").Funcs(funcMap).Parse(tmplData.Content)
+	if err != nil {
+		return fmt.Errorf("template parsing error: %v", err)
+	}
 
-    templateContext := map[string]interface{}{
-        "recipient": recipient,
-        "params":    req.Parameters,
-    }
+	// Create template context with recipient data and parameters
+	templateContext := map[string]interface{}{
+		"recipient": recipient,
+		"params":    req.Parameters,
+	}
 
-    var body strings.Builder
-    if err := tmpl.Execute(&body, templateContext); err != nil {
-        return fmt.Errorf("template execution error: %v", err)
-    }
+	var body strings.Builder
+	if err := tmpl.Execute(&body, templateContext); err != nil {
+		return fmt.Errorf("template execution error: %v", err)
+	}
 
-    headers := map[string]string{
-        "MIME-Version":              "1.0",
-        "Content-Type":              "text/html; charset=UTF-8",
-        "Subject":                   tmplData.Subject,
-        "From":                      service.EmailID,
-        "To":                        recipient.EmailAddress,
-        "X-Priority":                "3",
-        "X-Mailer":                  "Portfolio Mailer",
-        "Content-Transfer-Encoding": "8bit",
-    }
+	headers := map[string]string{
+		"MIME-Version":              "1.0",
+		"Content-Type":              "text/html; charset=UTF-8",
+		"Subject":                   tmplData.Subject,
+		"From":                      service.EmailID,
+		"To":                        recipient.EmailAddress,
+		"X-Priority":                "3",
+		"X-Mailer":                  "Portfolio Mailer",
+		"Content-Transfer-Encoding": "8bit",
+	}
 
-    var message strings.Builder
-    for key, value := range headers {
-        message.WriteString(fmt.Sprintf("%s: %s\r\n", key, value))
-    }
-    message.WriteString("\r\n")
-    message.WriteString(body.String())
+	var message strings.Builder
+	for key, value := range headers {
+		message.WriteString(fmt.Sprintf("%s: %s\r\n", key, value))
+	}
+	message.WriteString("\r\n")
+	message.WriteString(body.String())
 
-    auth := smtp.PlainAuth("", service.EmailID, service.Password, service.HostAddress)
-    err = smtp.SendMail(
-        fmt.Sprintf("%s:%d", service.HostAddress, service.Port),
-        auth,
-        service.EmailID,
-        []string{recipient.EmailAddress},
-        []byte(message.String()),
-    )
+	auth := smtp.PlainAuth("", service.EmailID, service.Password, service.HostAddress)
+	err = smtp.SendMail(
+		fmt.Sprintf("%s:%d", service.HostAddress, service.Port),
+		auth,
+		service.EmailID,
+		[]string{recipient.EmailAddress},
+		[]byte(message.String()),
+	)
 
-    // Log entry creation
-    logData := map[string]interface{}{
-        "user_id":       userID,
-        "service_id":    req.ServiceID,
-        "template_id":   req.TemplateID,
-        "email_address": recipient.EmailAddress,
-        "created_at":    time.Now(),
-    }
+	if err != nil {
+		// Create log entry for failed email
+		logEntry := LogEntry{
+			UserID:       userID,
+			ServiceID:    req.ServiceID,
+			TemplateID:   req.TemplateID,
+			Status:       "failed",
+			ErrorMessage: err.Error(),
+			CreatedAt:    time.Now(),
+		}
+		// Insert log entry and handle errors
+		if insertErr := ms.supaClient.DB.From("logs").Insert(logEntry).Execute(ctx, nil); insertErr != nil {
+			log.Printf("Failed to insert log entry: %v", insertErr)
+		}
+		return fmt.Errorf("email sending error: %v", err)
+	}
 
-    if err != nil {
-        logData["status"] = "failed"
-        logData["error_message"] = err.Error()
-        
-        var logResult interface{}
-        if logErr := ms.supaClient.DB.From("logs").Insert(logData).Execute(ctx, &logResult); logErr != nil {
-            return fmt.Errorf("email sending failed: %v, log entry failed: %v", err, logErr)
-        }
-        return fmt.Errorf("email sending failed: %v", err)
-    }
+	// Create log entry for successful email
+	logEntry := LogEntry{
+		UserID:     userID,
+		ServiceID:  req.ServiceID,
+		TemplateID: req.TemplateID,
+		Status:     "success",
+		Message:    fmt.Sprintf("Email sent to %s", recipient.EmailAddress),
+		CreatedAt:  time.Now(),
+	}
+	// Insert log entry and handle errors
+	if insertErr := ms.supaClient.DB.From("logs").Insert(logEntry).Execute(ctx, nil); insertErr != nil {
+		log.Printf("Failed to insert log entry: %v", insertErr)
+	}
 
-    logData["status"] = "success"
-    logData["message"] = fmt.Sprintf("Email sent to %s", recipient.EmailAddress)
-    
-    var logResult interface{}
-    if logErr := ms.supaClient.DB.From("logs").Insert(logData).Execute(ctx, &logResult); logErr != nil {
-        return fmt.Errorf("email sent but log entry failed: %v", logErr)
-    }
+	// Create email entry
+	emailEntry := EmailEntry{
+		UserID:       userID,
+		ServiceID:    req.ServiceID,
+		TemplateID:   req.TemplateID,
+		EmailAddress: recipient.EmailAddress,
+		Name:         recipient.Name,
+		SentAt:       time.Now(),
+	}
+	// Insert email entry and handle errors
+	if insertErr := ms.supaClient.DB.From("emails").Insert(emailEntry).Execute(ctx, nil); insertErr != nil {
+		log.Printf("Failed to insert email entry: %v", insertErr)
+	}
 
-    // Email record creation
-    emailData := map[string]interface{}{
-        "user_id":       userID,
-        "service_id":    req.ServiceID,
-        "template_id":   req.TemplateID,
-        "email_address": recipient.EmailAddress,
-        "name":          recipient.Name,
-        "sent_at":       time.Now(),
-    }
-
-    var emailResult interface{}
-    if emailErr := ms.supaClient.DB.From("emails").Insert(emailData).Execute(ctx, &emailResult); emailErr != nil {
-        return fmt.Errorf("email sent but email record creation failed: %v", emailErr)
-    }
-
-    return nil
+	return nil
 }
 
 func (ms *MailService) HealthCheckHandler(w http.ResponseWriter, r *http.Request) {
@@ -322,7 +330,11 @@ func main() {
 	}
 
 	r := mux.NewRouter()
+
+	// Email sending endpoint
 	r.HandleFunc("/send-emails", mailService.SendEmailsHandler).Methods("POST")
+
+	// Health check endpoint
 	r.HandleFunc("/health", mailService.HealthCheckHandler).Methods("GET")
 
 	port := os.Getenv("PORT")

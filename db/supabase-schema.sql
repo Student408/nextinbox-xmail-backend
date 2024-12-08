@@ -188,3 +188,23 @@ CREATE TRIGGER update_profile_modtime
     BEFORE UPDATE ON profile
     FOR EACH ROW
     EXECUTE FUNCTION update_modified_column();
+
+
+ALTER TABLE profile
+    ADD COLUMN rate_limit INT DEFAULT 300;
+
+CREATE OR REPLACE FUNCTION reset_rate_limit()
+RETURNS VOID AS $$
+BEGIN
+    UPDATE profile
+    SET rate_limit = 300
+    WHERE rate_limit < 300; -- Optional condition to reset only if rate_limit has been reduced
+END;
+$$ LANGUAGE plpgsql;
+
+
+
+CREATE EXTENSION IF NOT EXISTS pg_cron;
+
+SELECT cron.schedule('daily_rate_limit_reset', '0 0 * * *', $$CALL reset_rate_limit();$$);
+
