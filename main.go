@@ -84,9 +84,6 @@ func (ms *MailService) SendEmailsHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Get the Origin header from the incoming request
-	origin := r.Header.Get("Origin")
-
 	response := EmailResponse{Success: true}
 	var wg sync.WaitGroup
 	errorChan := make(chan error, len(req.Recipients))
@@ -95,8 +92,8 @@ func (ms *MailService) SendEmailsHandler(w http.ResponseWriter, r *http.Request)
 		wg.Add(1)
 		go func(rec Recipient) {
 			defer wg.Done()
-			// Pass the origin to sendSingleEmail
-			if err := ms.sendSingleEmail(&req, rec, origin); err != nil {
+			// Pass the request object to sendSingleEmail
+			if err := ms.sendSingleEmail(&req, rec, r); err != nil {
 				errorChan <- fmt.Errorf("error sending to %s: %v", rec.EmailAddress, err)
 			}
 		}(recipient)
@@ -157,7 +154,7 @@ type EmailEntry struct {
 }
 
 // Modify sendSingleEmail function
-func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, origin string) error {
+func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, r *http.Request) error {
 	ctx := context.Background()
 
 	// First get the user_id from user_key
@@ -195,7 +192,11 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, o
 
 	service := services[0]
 
-	// Parse the origin from the request
+	// Capture the Origin header from the request
+	origin := r.Header.Get("Origin")
+	log.Printf("Incoming request origin: %s", origin) // Added log for debugging
+
+	// Parse the origin
 	parsedOrigin, err := url.Parse(origin)
 	if err != nil {
 		return fmt.Errorf("invalid origin: %s", origin)
