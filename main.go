@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url" // Added import
 	"os"
 	"strings"
 	"sync"
@@ -182,21 +183,6 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, o
 		return fmt.Errorf("rate limit exceeded")
 	}
 
-	// Decrement the rate_limit by 1 using a struct instead of a map
-	updatedProfile := struct {
-		RateLimit int `json:"rate_limit"`
-	}{
-		RateLimit: profiles[0].RateLimit - 1,
-	}
-
-	err = ms.supaClient.DB.From("profile").
-		Update(updatedProfile).
-		Eq("user_id", userID).
-		Execute(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("failed to update user's rate limit: %v", err)
-	}
-
 	var services []Service
 	err = ms.supaClient.DB.From("services").
 		Select("*").
@@ -209,12 +195,30 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, o
 
 	service := services[0]
 
+	// Parse the origin from the request
+	parsedOrigin, err := url.Parse(origin)
+	if err != nil {
+		return fmt.Errorf("invalid origin: %s", origin)
+	}
+
 	// Check if the request's origin is allowed
 	if service.CorsOrigin != "" {
 		allowedOrigins := strings.Split(service.CorsOrigin, ",")
 		originAllowed := false
 		for _, allowedOrigin := range allowedOrigins {
-			if strings.TrimSpace(allowedOrigin) == origin {
+			allowedOrigin = strings.TrimSpace(allowedOrigin)
+			// Parse the allowed origin
+			parsedAllowedOrigin, err := url.Parse(allowedOrigin)
+			if err != nil {
+				continue // Skip invalid allowed origins
+			}
+			// Compare scheme
+			if parsedAllowedOrigin.Scheme != parsedOrigin.Scheme {
+				continue
+			}
+			// Check if origin hostname is the same or a subdomain
+			if parsedOrigin.Hostname() == parsedAllowedOrigin.Hostname() ||
+				strings.HasSuffix(parsedOrigin.Hostname(), "."+parsedAllowedOrigin.Hostname()) {
 				originAllowed = true
 				break
 			}
@@ -301,6 +305,23 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, o
 		[]string{recipient.EmailAddress},
 		[]byte(message.String()),
 	)
+
+	// Decrement the rate_limit only if email was sent successfully
+	if err == nil {
+		updatedProfile := struct {
+			RateLimit int `json:"rate_limit"`
+		}{
+			RateLimit: profiles[0].RateLimit - 1,
+		}
+
+		err = ms.supaClient.DB.From("profile").
+			Update(updatedProfile).
+			Eq("user_id", userID).
+			Execute(ctx, nil)
+		if err != nil {
+			log.Printf("Failed to update user's rate limit: %v", err)
+		}
+	}
 
 	// Create log entry regardless of success or failure
 	logEntry := LogEntry{
