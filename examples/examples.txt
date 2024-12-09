@@ -1,0 +1,293 @@
+Example 1: Appointment Reminder Email
+
+HTML Template:
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Appointment Reminder</title>
+</head>
+<body>
+    <h2>Appointment Reminder for {{.name}}</h2>
+    <p>Dear {{.name}},</p>
+    <p>This is a friendly reminder for your upcoming appointment.</p>
+    <ul>
+        <li><strong>Appointment Date:</strong> {{.appointment_date}}</li>
+        <li><strong>Appointment Time:</strong> {{.appointment_time}}</li>
+        <li><strong>Doctor's Name:</strong> {{.doctor_name}}</li>
+        <li><strong>Clinic Address:</strong> {{.clinic_address}}</li>
+        <li><strong>Contact Number:</strong> {{.contact_number}}</li>
+        <li><strong>Room Number:</strong> {{.room_number}}</li>
+        <li><strong>Preparation Instructions:</strong> {{.instructions}}</li>
+        <li><strong>Parking Information:</strong> {{.parking_info}}</li>
+        <li><strong>Confirmation Code:</strong> {{.confirmation_code}}</li>
+    </ul>
+    <p>Please arrive 15 minutes before your scheduled time.</p>
+    <p>Best regards,<br>{{.clinic_name}} Team</p>
+</body>
+</html>
+
+JSON Request:
+
+{
+    "user_key": "example_user_key",
+    "service_id": "example_service_id",
+    "template_id": "example_template_id",
+    "recipients": [
+        {
+            "email_address": "patient@example.com",
+            "name": "John Doe"
+        }
+    ],
+    "parameters": {
+        "name": "John Doe",
+        "appointment_date": "2023-12-01",
+        "appointment_time": "10:00 AM",
+        "doctor_name": "Dr. Smith",
+        "clinic_address": "123 Health St, Wellness City",
+        "contact_number": "+1234567890",
+        "room_number": "Room 305",
+        "instructions": "Please bring your medical records.",
+        "parking_info": "Parking available at Lot B",
+        "confirmation_code": "ABC123",
+        "clinic_name": "Wellness Clinic"
+    }
+}
+
+Example 2: Order Confirmation Email
+
+HTML Template:
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Order Confirmation - Order #{{.order_number}}</title>
+</head>
+<body>
+    <h2>Thank you for your order, {{.customer_name}}!</h2>
+    <p>Your order has been placed successfully. Here are your order details:</p>
+    <ul>
+        <li><strong>Order Number:</strong> {{.order_number}}</li>
+        <li><strong>Order Date:</strong> {{.order_date}}</li>
+        <li><strong>Shipping Address:</strong> {{.shipping_address}}</li>
+        <li><strong>Billing Address:</strong> {{.billing_address}}</li>
+        <li><strong>Payment Method:</strong> {{.payment_method}}</li>
+        <li><strong>Items Ordered:</strong></li>
+        <ul>
+            {{range .items}}
+            <li>{{.quantity}} x {{.product_name}} - {{.product_price}}</li>
+            {{end}}
+        </ul>
+        <li><strong>Subtotal:</strong> {{.subtotal}}</li>
+        <li><strong>Tax:</strong> {{.tax}}</li>
+        <li><strong>Total Amount:</strong> {{.total_amount}}</li>
+        <li><strong>Estimated Delivery:</strong> {{.estimated_delivery}}</li>
+        <li><strong>Tracking Number:</strong> {{.tracking_number}}</li>
+    </ul>
+    <p>If you have any questions, feel free to contact us at {{.support_email}}.</p>
+    <p>Best regards,<br>{{.company_name}} Team</p>
+</body>
+</html>
+
+JSON Request:
+
+{
+    "user_key": "example_user_key",
+    "service_id": "example_service_id",
+    "template_id": "example_template_id",
+    "recipients": [
+        {
+            "email_address": "customer@example.com",
+            "name": "Jane Smith"
+        }
+    ],
+    "parameters": {
+        "customer_name": "Jane Smith",
+        "order_number": "ORD123456",
+        "order_date": "2023-11-15",
+        "shipping_address": "456 Main St, Cityville",
+        "billing_address": "789 Second St, Townsville",
+        "payment_method": "Credit Card",
+        "items": [
+            {"product_name": "Wireless Mouse", "quantity": 2, "product_price": "$25"},
+            {"product_name": "Keyboard", "quantity": 1, "product_price": "$45"}
+        ],
+        "subtotal": "$95",
+        "tax": "$5",
+        "total_amount": "$100",
+        "estimated_delivery": "2023-11-20",
+        "tracking_number": "TRACK123456",
+        "support_email": "support@company.com",
+        "company_name": "Tech Store"
+    }
+}
+
+Example 3: Event Invitation Email
+
+HTML Template:
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Invitation to {{.event_name}}</title>
+</head>
+<body>
+    <h2>You're Invited: {{.event_name}}</h2>
+    <p>Dear {{.recipient_name}},</p>
+    <p>We are excited to invite you to our upcoming event:</p>
+    <ul>
+        <li><strong>Event Name:</strong> {{.event_name}}</li>
+        <li><strong>Date:</strong> {{.event_date}}</li>
+        <li><strong>Time:</strong> {{.event_time}}</li>
+        <li><strong>Venue:</strong> {{.event_venue}}</li>
+        <li><strong>Address:</strong> {{.event_address}}</li>
+        <li><strong>Dress Code:</strong> {{.dress_code}}</li>
+        <li><strong>RSVP By:</strong> {{.rsvp_date}}</li>
+        <li><strong>Contact Person:</strong> {{.contact_person}}</li>
+        <li><strong>Contact Email:</strong> {{.contact_email}}</li>
+        <li><strong>Additional Info:</strong> {{.additional_info}}</li>
+    </ul>
+    <p>Please confirm your attendance at your earliest convenience.</p>
+    <p>Best regards,<br>{{.organizer_name}}</p>
+</body>
+</html>
+
+JSON Request:
+
+{
+    "user_key": "example_user_key",
+    "service_id": "example_service_id",
+    "template_id": "example_template_id",
+    "recipients": [
+        {
+            "email_address": "guest@example.com",
+            "name": "Michael Johnson"
+        }
+    ],
+    "parameters": {
+        "recipient_name": "Michael Johnson",
+        "event_name": "Annual Gala Night",
+        "event_date": "2023-12-31",
+        "event_time": "7:00 PM",
+        "event_venue": "Grand Ballroom",
+        "event_address": "100 Luxury Ave, Metropolis",
+        "dress_code": "Black Tie",
+        "rsvp_date": "2023-12-15",
+        "contact_person": "Emily Davis",
+        "contact_email": "emily.davis@example.com",
+        "additional_info": "Complimentary valet parking is available.",
+        "organizer_name": "Elite Events Co."
+    }
+}
+
+Example 4: Newsletter Subscription Confirmation
+
+HTML Template:
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Subscription Confirmation</title>
+</head>
+<body>
+    <h2>Welcome to {{.newsletter_name}} Newsletter!</h2>
+    <p>Dear {{.subscriber_name}},</p>
+    <p>Thank you for subscribing to our newsletter.</p>
+    <ul>
+        <li><strong>Subscription Date:</strong> {{.subscription_date}}</li>
+        <li><strong>Email Address:</strong> {{.email_address}}</li>
+        <li><strong>Interest Topics:</strong> {{.interest_topics}}</li>
+        <li><strong>Preferred Frequency:</strong> {{.frequency}}</li>
+        <li><strong>Referral Source:</strong> {{.referral_source}}</li>
+        <li><strong>Promo Code Used:</strong> {{.promo_code}}</li>
+        <li><strong>Account Manager:</strong> {{.account_manager}}</li>
+        <li><strong>Support Contact:</strong> {{.support_contact}}</li>
+        <li><strong>Website:</strong> <a href="{{.website_url}}">{{.website_url}}</a></li>
+    </ul>
+    <p>We're excited to keep you updated with our latest news and offers.</p>
+    <p>Best regards,<br>{{.company_name}} Team</p>
+</body>
+</html>
+
+JSON Request:
+
+{
+    "user_key": "example_user_key",
+    "service_id": "example_service_id",
+    "template_id": "example_template_id",
+    "recipients": [
+        {
+            "email_address": "subscriber@example.com",
+            "name": "Emily Clark"
+        }
+    ],
+    "parameters": {
+        "subscriber_name": "Emily Clark",
+        "subscription_date": "2023-11-01",
+        "email_address": "subscriber@example.com",
+        "interest_topics": "Technology, Science, Health",
+        "frequency": "Weekly",
+        "referral_source": "Friend",
+        "promo_code": "WELCOME2023",
+        "account_manager": "John Doe",
+        "support_contact": "support@company.com",
+        "website_url": "https://www.company.com",
+        "company_name": "Future Insights"
+    }
+}
+
+Example 5: Survey Invitation Email
+
+HTML Template:
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>We Value Your Feedback!</title>
+</head>
+<body>
+    <h2>Dear {{.customer_name}},</h2>
+    <p>We would appreciate it if you could take a few minutes to complete our customer satisfaction survey.</p>
+    <ul>
+        <li><strong>Customer ID:</strong> {{.customer_id}}</li>
+        <li><strong>Last Purchase Date:</strong> {{.last_purchase_date}}</li>
+        <li><strong>Survey Link:</strong> <a href="{{.survey_link}}">Click here to start the survey</a></li>
+        <li><strong>Incentive Offered:</strong> {{.incentive}}</li>
+        <li><strong>Survey Expiration Date:</strong> {{.expiration_date}}</li>
+        <li><strong>Support Email:</strong> {{.support_email}}</li>
+        <li><strong>Company Address:</strong> {{.company_address}}</li>
+        <li><strong>Unsubscribe Link:</strong> <a href="{{.unsubscribe_link}}">Unsubscribe</a></li>
+        <li><strong>Privacy Policy:</strong> <a href="{{.privacy_policy_url}}">View Privacy Policy</a></li>
+    </ul>
+    <p>Your feedback is important to us and will help us improve our services.</p>
+    <p>Thank you in advance,<br>{{.company_name}} Team</p>
+</body>
+</html>
+
+JSON Request:
+
+{
+    "user_key": "example_user_key",
+    "service_id": "example_service_id",
+    "template_id": "example_template_id",
+    "recipients": [
+        {
+            "email_address": "customer@example.com",
+            "name": "Robert Brown"
+        }
+    ],
+    "parameters": {
+        "customer_name": "Robert Brown",
+        "customer_id": "CUST78901",
+        "last_purchase_date": "2023-10-25",
+        "survey_link": "https://www.company.com/survey?token=xyz123",
+        "incentive": "10% discount on next purchase",
+        "expiration_date": "2023-11-30",
+        "support_email": "help@company.com",
+        "company_address": "101 Business Rd, Commerce City",
+        "unsubscribe_link": "https://www.company.com/unsubscribe",
+        "privacy_policy_url": "https://www.company.com/privacy",
+        "company_name": "Customer Care Inc."
+    }
+}
+

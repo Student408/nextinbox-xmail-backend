@@ -238,19 +238,28 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, r
 		req.Parameters["date"] = parsedDate
 	}
 
+	// Update template struct to include additional fields
 	var templates []struct {
-		Content string `json:"content"`
-		Subject string `json:"subject"`
+		Content   string `json:"content"`
+		Subject   string `json:"subject"`
+		FromName  string `json:"from_name"`
+		ToEmail   string `json:"to_email"`
+		ReplyTo   string `json:"reply_to"`
+		Bcc       string `json:"bcc"`
+		Cc        string `json:"cc"`
 	}
+
+	// Modify the SELECT query to fetch additional fields
 	err = ms.supaClient.DB.From("templates").
-		Select("content", "subject").
+		Select("content", "subject", "from_name", "to_email", "reply_to", "bcc", "cc").
 		Eq("template_id", req.TemplateID).
-		Eq("user_id", userID). // Use resolved userID
+		Eq("user_id", userID).
 		Execute(ctx, &templates)
 	if err != nil || len(templates) == 0 {
 		return fmt.Errorf("invalid template_id")
 	}
 
+	// Use fetched template data
 	tmplData := templates[0]
 
 	// Create template with function map for additional template functionality
@@ -285,15 +294,38 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, r
 		return fmt.Errorf("template execution error: %v", err)
 	}
 
+	// Modify the "From" header to include FromName
+	fromHeader := service.EmailID
+	if tmplData.FromName != "" {
+		fromHeader = fmt.Sprintf("%s <%s>", tmplData.FromName, service.EmailID)
+	}
+
+	// If ToEmail is provided in the template, use it; otherwise use recipient's email
+	toHeader := recipient.EmailAddress
+	if tmplData.ToEmail != "" {
+		toHeader = tmplData.ToEmail
+	}
+
 	headers := map[string]string{
 		"MIME-Version":              "1.0",
 		"Content-Type":              "text/html; charset=UTF-8",
 		"Subject":                   tmplData.Subject,
-		"From":                      service.EmailID,
-		"To":                        recipient.EmailAddress,
+		"From":                      fromHeader,
+		"To":                        toHeader,
 		"X-Priority":                "3",
 		"X-Mailer":                  "Portfolio Mailer",
 		"Content-Transfer-Encoding": "8bit",
+	}
+
+	// Conditionally add Reply-To, CC, and BCC headers if provided
+	if tmplData.ReplyTo != "" {
+		headers["Reply-To"] = tmplData.ReplyTo
+	}
+	if tmplData.Cc != "" {
+		headers["Cc"] = tmplData.Cc
+	}
+	if tmplData.Bcc != "" {
+		headers["Bcc"] = tmplData.Bcc
 	}
 
 	var message strings.Builder
@@ -305,12 +337,31 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, r
 
 	auth := smtp.PlainAuth("", service.EmailID, service.Password, service.HostAddress)
 
-	// Attempt to send the email
+	// Build the recipient list for sending the email
+	toAddresses := []string{recipient.EmailAddress}
+	if tmplData.ToEmail != "" {
+		toAddresses = []string{tmplData.ToEmail}
+	}
+
+	if tmplData.Cc != "" {
+		ccAddresses := strings.Split(tmplData.Cc, ",")
+		for _, addr := range ccAddresses {
+			toAddresses = append(toAddresses, strings.TrimSpace(addr))
+		}
+	}
+	if tmplData.Bcc != "" {
+		bccAddresses := strings.Split(tmplData.Bcc, ",")
+		for _, addr := range bccAddresses {
+			toAddresses = append(toAddresses, strings.TrimSpace(addr))
+		}
+	}
+
+	// Use toAddresses when sending the email
 	err = smtp.SendMail(
 		fmt.Sprintf("%s:%d", service.HostAddress, service.Port),
 		auth,
 		service.EmailID,
-		[]string{recipient.EmailAddress},
+		toAddresses,
 		[]byte(message.String()),
 	)
 
