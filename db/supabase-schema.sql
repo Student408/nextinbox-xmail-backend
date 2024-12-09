@@ -202,9 +202,13 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-
-
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 
-SELECT cron.schedule('daily_rate_limit_reset', '0 0 * * *', $$CALL reset_rate_limit();$$);
+SELECT cron.schedule('daily_rate_limit_reset', '40 9 * * *', $$SELECT reset_rate_limit();$$);
+
+SELECT * FROM cron.job; --Check if the cron job is correctly scheduled
+
+--Manually trigger the cron job to verify functionality:
+
+-- SELECT cron.schedule('test_reset_rate_limit', 'NOW()', $$SELECT reset_rate_limit();$$);
 
