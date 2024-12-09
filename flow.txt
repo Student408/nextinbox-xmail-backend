@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url" // Added import
 	"os"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
 	supabase "github.com/lengzuo/supa"
+	"github.com/rs/cors"
 )
 
 type MailService struct {
@@ -83,9 +85,6 @@ func (ms *MailService) SendEmailsHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Get the Origin header from the incoming request
-	origin := r.Header.Get("Origin")
-
 	response := EmailResponse{Success: true}
 	var wg sync.WaitGroup
 	errorChan := make(chan error, len(req.Recipients))
@@ -94,8 +93,8 @@ func (ms *MailService) SendEmailsHandler(w http.ResponseWriter, r *http.Request)
 		wg.Add(1)
 		go func(rec Recipient) {
 			defer wg.Done()
-			// Pass the origin to sendSingleEmail
-			if err := ms.sendSingleEmail(&req, rec, origin); err != nil {
+			// Pass the request object to sendSingleEmail
+			if err := ms.sendSingleEmail(&req, rec, r); err != nil {
 				errorChan <- fmt.Errorf("error sending to %s: %v", rec.EmailAddress, err)
 			}
 		}(recipient)
@@ -139,32 +138,47 @@ func (ms *MailService) getUserIDFromKey(ctx context.Context, userKey string) (st
 
 // Define structs for logs and emails
 type LogEntry struct {
-	UserID       string    `json:"user_id"`
-	ServiceID    string    `json:"service_id"`
-	TemplateID   string    `json:"template_id"`
-	Status       string    `json:"status"`
-	Message      string    `json:"message,omitempty"`
-	ErrorMessage string    `json:"error_message,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
+	UserID     string `json:"user_id"`
+	ServiceID  string `json:"service_id"`
+	TemplateID string `json:"template_id"`
+	Status     string `json:"status"`
+	Message    string `json:"message,omitempty"`
 }
 
 type EmailEntry struct {
-	UserID       string    `json:"user_id"`
-	ServiceID    string    `json:"service_id"`
-	TemplateID   string    `json:"template_id"`
-	EmailAddress string    `json:"email_address"`
-	Name         string    `json:"name,omitempty"`
-	SentAt       time.Time `json:"sent_at"`
+	UserID       string `json:"user_id"`
+	ServiceID    string `json:"service_id"`
+	TemplateID   string `json:"template_id"`
+	EmailAddress string `json:"email_address"`
+	Name         string `json:"name,omitempty"`
+	PhoneNumber  string `json:"phone_number,omitempty"`
 }
 
 // Modify sendSingleEmail function
-func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, origin string) error {
+func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, r *http.Request) error {
 	ctx := context.Background()
 
 	// First get the user_id from user_key
 	userID, err := ms.getUserIDFromKey(ctx, req.UserKey)
 	if err != nil {
-		return fmt.Errorf("failed to get user_id: %v", err)
+		return fmt.Errorf("invalid user_key: %v", err)
+	}
+
+	// Fetch the user's rate_limit from the profile table
+	var profiles []struct {
+		RateLimit int `json:"rate_limit"`
+	}
+	err = ms.supaClient.DB.From("profile").
+		Select("rate_limit").
+		Eq("user_id", userID).
+		Execute(ctx, &profiles)
+	if err != nil || len(profiles) == 0 {
+		return fmt.Errorf("failed to fetch user's rate limit: %v", err)
+	}
+
+	// Check if rate_limit is greater than zero
+	if profiles[0].RateLimit <= 0 {
+		return fmt.Errorf("rate limit exceeded")
 	}
 
 	var services []Service
@@ -174,17 +188,39 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, o
 		Eq("user_id", userID). // Use resolved userID
 		Execute(ctx, &services)
 	if err != nil || len(services) == 0 {
-		return fmt.Errorf("failed to fetch service: %v", err)
+		return fmt.Errorf("invalid service_id")
 	}
 
 	service := services[0]
+
+	// Capture the Origin header from the request
+	origin := r.Header.Get("Origin")
+	log.Printf("Incoming request origin: %s", origin) // Added log for debugging
+
+	// Parse the origin
+	parsedOrigin, err := url.Parse(origin)
+	if err != nil {
+		return fmt.Errorf("invalid origin: %s", origin)
+	}
 
 	// Check if the request's origin is allowed
 	if service.CorsOrigin != "" {
 		allowedOrigins := strings.Split(service.CorsOrigin, ",")
 		originAllowed := false
 		for _, allowedOrigin := range allowedOrigins {
-			if strings.TrimSpace(allowedOrigin) == origin {
+			allowedOrigin = strings.TrimSpace(allowedOrigin)
+			// Parse the allowed origin
+			parsedAllowedOrigin, err := url.Parse(allowedOrigin)
+			if err != nil {
+				continue // Skip invalid allowed origins
+			}
+			// Compare scheme
+			if parsedAllowedOrigin.Scheme != parsedOrigin.Scheme {
+				continue
+			}
+			// Check if origin hostname is the same or a subdomain
+			if parsedOrigin.Hostname() == parsedAllowedOrigin.Hostname() ||
+				strings.HasSuffix(parsedOrigin.Hostname(), "."+parsedAllowedOrigin.Hostname()) {
 				originAllowed = true
 				break
 			}
@@ -202,19 +238,28 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, o
 		req.Parameters["date"] = parsedDate
 	}
 
+	// Update template struct to include additional fields
 	var templates []struct {
-		Content string `json:"content"`
-		Subject string `json:"subject"`
-	}
-	err = ms.supaClient.DB.From("templates").
-		Select("content", "subject").
-		Eq("template_id", req.TemplateID).
-		Eq("user_id", userID). // Use resolved userID
-		Execute(ctx, &templates)
-	if err != nil || len(templates) == 0 {
-		return fmt.Errorf("failed to fetch template: %v", err)
+		Content   string `json:"content"`
+		Subject   string `json:"subject"`
+		FromName  string `json:"from_name"`
+		ToEmail   string `json:"to_email"`
+		ReplyTo   string `json:"reply_to"`
+		Bcc       string `json:"bcc"`
+		Cc        string `json:"cc"`
 	}
 
+	// Modify the SELECT query to fetch additional fields
+	err = ms.supaClient.DB.From("templates").
+		Select("content", "subject", "from_name", "to_email", "reply_to", "bcc", "cc").
+		Eq("template_id", req.TemplateID).
+		Eq("user_id", userID).
+		Execute(ctx, &templates)
+	if err != nil || len(templates) == 0 {
+		return fmt.Errorf("invalid template_id")
+	}
+
+	// Use fetched template data
 	tmplData := templates[0]
 
 	// Create template with function map for additional template functionality
@@ -232,10 +277,16 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, o
 		return fmt.Errorf("template parsing error: %v", err)
 	}
 
-	// Create template context with recipient data and parameters
-	templateContext := map[string]interface{}{
-		"recipient": recipient,
-		"params":    req.Parameters,
+	// Create template context with recipient data and parameters directly accessible
+	templateContext := make(map[string]interface{})
+
+	// Add recipient fields to template context
+	templateContext["email_address"] = recipient.EmailAddress
+	templateContext["name"] = recipient.Name
+
+	// Add request parameters to template context
+	for key, value := range req.Parameters {
+		templateContext[key] = value
 	}
 
 	var body strings.Builder
@@ -243,15 +294,38 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, o
 		return fmt.Errorf("template execution error: %v", err)
 	}
 
+	// Modify the "From" header to include FromName
+	fromHeader := service.EmailID
+	if tmplData.FromName != "" {
+		fromHeader = fmt.Sprintf("%s <%s>", tmplData.FromName, service.EmailID)
+	}
+
+	// If ToEmail is provided in the template, use it; otherwise use recipient's email
+	toHeader := recipient.EmailAddress
+	if tmplData.ToEmail != "" {
+		toHeader = tmplData.ToEmail
+	}
+
 	headers := map[string]string{
 		"MIME-Version":              "1.0",
 		"Content-Type":              "text/html; charset=UTF-8",
 		"Subject":                   tmplData.Subject,
-		"From":                      service.EmailID,
-		"To":                        recipient.EmailAddress,
+		"From":                      fromHeader,
+		"To":                        toHeader,
 		"X-Priority":                "3",
 		"X-Mailer":                  "Portfolio Mailer",
 		"Content-Transfer-Encoding": "8bit",
+	}
+
+	// Conditionally add Reply-To, CC, and BCC headers if provided
+	if tmplData.ReplyTo != "" {
+		headers["Reply-To"] = tmplData.ReplyTo
+	}
+	if tmplData.Cc != "" {
+		headers["Cc"] = tmplData.Cc
+	}
+	if tmplData.Bcc != "" {
+		headers["Bcc"] = tmplData.Bcc
 	}
 
 	var message strings.Builder
@@ -262,57 +336,99 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, o
 	message.WriteString(body.String())
 
 	auth := smtp.PlainAuth("", service.EmailID, service.Password, service.HostAddress)
+
+	// Build the recipient list for sending the email
+	toAddresses := []string{recipient.EmailAddress}
+	if tmplData.ToEmail != "" {
+		toAddresses = []string{tmplData.ToEmail}
+	}
+
+	if tmplData.Cc != "" {
+		ccAddresses := strings.Split(tmplData.Cc, ",")
+		for _, addr := range ccAddresses {
+			toAddresses = append(toAddresses, strings.TrimSpace(addr))
+		}
+	}
+	if tmplData.Bcc != "" {
+		bccAddresses := strings.Split(tmplData.Bcc, ",")
+		for _, addr := range bccAddresses {
+			toAddresses = append(toAddresses, strings.TrimSpace(addr))
+		}
+	}
+
+	// Use toAddresses when sending the email
 	err = smtp.SendMail(
 		fmt.Sprintf("%s:%d", service.HostAddress, service.Port),
 		auth,
 		service.EmailID,
-		[]string{recipient.EmailAddress},
+		toAddresses,
 		[]byte(message.String()),
 	)
 
-	if err != nil {
-		// Create log entry for failed email
-		logEntry := LogEntry{
-			UserID:       userID,
-			ServiceID:    req.ServiceID,
-			TemplateID:   req.TemplateID,
-			Status:       "failed",
-			ErrorMessage: err.Error(),
-			CreatedAt:    time.Now(),
+	// Decrement the rate_limit only if email was sent successfully
+	if err == nil {
+		updatedProfile := struct {
+			RateLimit int `json:"rate_limit"`
+		}{
+			RateLimit: profiles[0].RateLimit - 1,
 		}
-		// Insert log entry and handle errors
-		if insertErr := ms.supaClient.DB.From("logs").Insert(logEntry).Execute(ctx, nil); insertErr != nil {
-			log.Printf("Failed to insert log entry: %v", insertErr)
+
+		err = ms.supaClient.DB.From("profile").
+			Update(updatedProfile).
+			Eq("user_id", userID).
+			Execute(ctx, nil)
+		if err != nil {
+			log.Printf("Failed to update user's rate limit: %v", err)
 		}
-		return fmt.Errorf("email sending error: %v", err)
 	}
 
-	// Create log entry for successful email
+	// Create log entry regardless of success or failure
 	logEntry := LogEntry{
 		UserID:     userID,
 		ServiceID:  req.ServiceID,
 		TemplateID: req.TemplateID,
 		Status:     "success",
 		Message:    fmt.Sprintf("Email sent to %s", recipient.EmailAddress),
-		CreatedAt:  time.Now(),
 	}
+	if err != nil {
+		// If sending email failed, set status to "failed" and include the error message
+		logEntry.Status = "failed"
+		logEntry.Message = err.Error()
+	}
+
 	// Insert log entry and handle errors
 	if insertErr := ms.supaClient.DB.From("logs").Insert(logEntry).Execute(ctx, nil); insertErr != nil {
 		log.Printf("Failed to insert log entry: %v", insertErr)
 	}
 
-	// Create email entry
-	emailEntry := EmailEntry{
-		UserID:       userID,
-		ServiceID:    req.ServiceID,
-		TemplateID:   req.TemplateID,
-		EmailAddress: recipient.EmailAddress,
-		Name:         recipient.Name,
-		SentAt:       time.Now(),
+	if err != nil {
+		return fmt.Errorf("email sending error: %v", err)
 	}
-	// Insert email entry and handle errors
-	if insertErr := ms.supaClient.DB.From("emails").Insert(emailEntry).Execute(ctx, nil); insertErr != nil {
-		log.Printf("Failed to insert email entry: %v", insertErr)
+
+	// Check if the email entry already exists
+	var existingEmails []EmailEntry
+	err = ms.supaClient.DB.From("emails").
+		Select("*").
+		Eq("user_id", userID).
+		Eq("email_address", recipient.EmailAddress).
+		Eq("template_id", req.TemplateID).
+		Execute(ctx, &existingEmails)
+	if err != nil {
+		log.Printf("Failed to check existing emails: %v", err)
+	} else if len(existingEmails) == 0 {
+		// Create email entry since it doesn't exist
+		emailEntry := EmailEntry{
+			UserID:       userID,
+			ServiceID:    req.ServiceID,
+			TemplateID:   req.TemplateID,
+			EmailAddress: recipient.EmailAddress,
+			Name:         recipient.Name,
+			PhoneNumber:  "", // Add PhoneNumber field to match the emails table schema
+		}
+		// Insert email entry and handle errors
+		if insertErr := ms.supaClient.DB.From("emails").Insert(emailEntry).Execute(ctx, nil); insertErr != nil {
+			log.Printf("Failed to insert email entry: %v", insertErr)
+		}
 	}
 
 	return nil
@@ -321,6 +437,30 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, o
 func (ms *MailService) HealthCheckHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+func (ms *MailService) IsOriginAllowed(origin string) bool {
+	ctx := context.Background()
+	var services []Service
+	err := ms.supaClient.DB.From("services").
+		Select("cors_origin").
+		Execute(ctx, &services)
+	if err != nil {
+		log.Printf("Failed to fetch services: %v", err)
+		return false
+	}
+	for _, service := range services {
+		if service.CorsOrigin != "" {
+			origins := strings.Split(service.CorsOrigin, ",")
+			for _, o := range origins {
+				o = strings.TrimSpace(o)
+				if o == origin {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 func main() {
@@ -337,11 +477,18 @@ func main() {
 	// Health check endpoint
 	r.HandleFunc("/health", mailService.HealthCheckHandler).Methods("GET")
 
+	c := cors.New(cors.Options{
+		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
+		AllowCredentials: true,
+		AllowedOrigins:   []string{"*"}, // Replace with your allowed origins
+	})
+	handler := c.Handler(r)
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
 	log.Printf("Server starting on port %s", port)
-	log.Fatal(http.ListenAndServe(":"+port, r))
+	log.Fatal(http.ListenAndServe(":"+port, handler))
 }

@@ -79,6 +79,9 @@ func NewMailService() (*MailService, error) {
 }
 
 func (ms *MailService) SendEmailsHandler(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
 	var req EmailRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
@@ -93,8 +96,7 @@ func (ms *MailService) SendEmailsHandler(w http.ResponseWriter, r *http.Request)
 		wg.Add(1)
 		go func(rec Recipient) {
 			defer wg.Done()
-			// Pass the request object to sendSingleEmail
-			if err := ms.sendSingleEmail(&req, rec, r); err != nil {
+			if err := ms.sendSingleEmail(ctx, &req, rec, r); err != nil {
 				errorChan <- fmt.Errorf("error sending to %s: %v", rec.EmailAddress, err)
 			}
 		}(recipient)
@@ -155,8 +157,7 @@ type EmailEntry struct {
 }
 
 // Modify sendSingleEmail function
-func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, r *http.Request) error {
-	ctx := context.Background()
+func (ms *MailService) sendSingleEmail(ctx context.Context, req *EmailRequest, recipient Recipient, r *http.Request) error {
 
 	// First get the user_id from user_key
 	userID, err := ms.getUserIDFromKey(ctx, req.UserKey)
