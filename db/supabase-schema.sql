@@ -197,14 +197,18 @@ CREATE OR REPLACE FUNCTION reset_rate_limit()
 RETURNS VOID AS $$
 BEGIN
     UPDATE profile
-    SET rate_limit = 300
-    WHERE rate_limit < 300; -- Optional condition to reset only if rate_limit has been reduced
+    SET rate_limit = 250
+    WHERE rate_limit < 250; -- Optional condition to reset only if rate_limit has been reduced
 END;
 $$ LANGUAGE plpgsql;
 
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 
-SELECT cron.schedule('daily_rate_limit_reset', '40 9 * * *', $$SELECT reset_rate_limit();$$);
+Remove the existing cron job
+-- SELECT cron.unschedule('daily_rate_limit_reset');
+
+SELECT cron.schedule('daily_rate_limit_reset', '30 5 * * *', $$SELECT reset_rate_limit();$$);
+
 
 SELECT * FROM cron.job; --Check if the cron job is correctly scheduled
 

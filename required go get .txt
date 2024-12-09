@@ -1,2 +1,2 @@
-go get golang.org/x/time/rate
+go mod init nextinbox && go get github.com/gorilla/mux github.com/joho/godotenv github.com/lengzuo/supa github.com/rs/cors golang.org/x/time/rate
 
