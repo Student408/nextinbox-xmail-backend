@@ -268,10 +268,16 @@ func (ms *MailService) sendSingleEmail(req *EmailRequest, recipient Recipient, r
 		return fmt.Errorf("template parsing error: %v", err)
 	}
 
-	// Create template context with recipient data and parameters
-	templateContext := map[string]interface{}{
-		"recipient": recipient,
-		"params":    req.Parameters,
+	// Create template context with recipient data and parameters directly accessible
+	templateContext := make(map[string]interface{})
+
+	// Add recipient fields to template context
+	templateContext["email_address"] = recipient.EmailAddress
+	templateContext["name"] = recipient.Name
+
+	// Add request parameters to template context
+	for key, value := range req.Parameters {
+		templateContext[key] = value
 	}
 
 	var body strings.Builder
@@ -423,7 +429,7 @@ func main() {
 	c := cors.New(cors.Options{
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
 		AllowCredentials: true,
-		AllowedOrigins: []string{"*"}, // Replace with your allowed origins
+		AllowedOrigins:   []string{"*"}, // Replace with your allowed origins
 	})
 	handler := c.Handler(r)
 
