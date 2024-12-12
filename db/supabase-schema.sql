@@ -204,7 +204,8 @@ $$ LANGUAGE plpgsql;
 
 CREATE EXTENSION IF NOT EXISTS pg_cron;
 
-Remove the existing cron job
+-- Remove the existing cron job
+
 -- SELECT cron.unschedule('daily_rate_limit_reset');
 
 SELECT cron.schedule('daily_rate_limit_reset', '30 5 * * *', $$SELECT reset_rate_limit();$$);
