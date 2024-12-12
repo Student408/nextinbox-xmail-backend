@@ -1,5 +1,5 @@
 # Use a lightweight Go image for building
-FROM golang:1.20-alpine AS builder
+FROM golang:1.23.3-alpine AS builder
 
 # Install necessary tools in the builder image
 RUN apk add --no-cache git
