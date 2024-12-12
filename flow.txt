@@ -241,13 +241,13 @@ func (ms *MailService) sendSingleEmail(ctx context.Context, req *EmailRequest, r
 
 	// Update template struct to include additional fields
 	var templates []struct {
-		Content   string `json:"content"`
-		Subject   string `json:"subject"`
-		FromName  string `json:"from_name"`
-		ToEmail   string `json:"to_email"`
-		ReplyTo   string `json:"reply_to"`
-		Bcc       string `json:"bcc"`
-		Cc        string `json:"cc"`
+		Content  string `json:"content"`
+		Subject  string `json:"subject"`
+		FromName string `json:"from_name"`
+		ToEmail  string `json:"to_email"`
+		ReplyTo  string `json:"reply_to"`
+		Bcc      string `json:"bcc"`
+		Cc       string `json:"cc"`
 	}
 
 	// Modify the SELECT query to fetch additional fields
