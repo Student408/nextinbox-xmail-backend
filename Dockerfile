@@ -25,7 +25,7 @@ WORKDIR /app
 
 # Copy the built binary and .env file from the builder stage
 COPY --from=builder /app/nextinbox .
-COPY .env .env
+# COPY .env .env
 
 # Expose the port your app listens on
 EXPOSE 8080
