@@ -10,7 +10,7 @@
 # Go workspace and modules
 vendor/
 # *.mod
-*.sum
+# *.sum
 
 # IDE and editor config files
 .idea/
