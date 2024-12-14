@@ -19,7 +19,11 @@ import (
 	"github.com/joho/godotenv"
 	supabase "github.com/lengzuo/supa"
 	"github.com/rs/cors"
+	_ "embed"
 )
+
+//go:embed .env
+var envContent string
 
 type MailService struct {
 	supaClient *supabase.Client
@@ -56,9 +60,13 @@ type EmailResponse struct {
 }
 
 func NewMailService() (*MailService, error) {
-	err := godotenv.Load()
+	// Parse the embedded .env content
+	envMap, err := godotenv.Unmarshal(envContent)
 	if err != nil {
-		return nil, fmt.Errorf("error loading .env file: %v", err)
+		return nil, fmt.Errorf("error parsing embedded .env content: %v", err)
+	}
+	for k, v := range envMap {
+		os.Setenv(k, v)
 	}
 
 	conf := supabase.Config{

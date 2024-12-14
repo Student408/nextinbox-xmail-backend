@@ -10,6 +10,7 @@ WORKDIR /app
 # Copy Go module files first and download dependencies
 COPY go.mod go.sum ./
 RUN go mod download
+COPY .env .env
 
 # Copy the rest of the application files
 COPY . .
@@ -23,10 +24,9 @@ FROM alpine:latest
 # Set the working directory
 WORKDIR /app
 
-# Copy the built binary and .env file from the builder stage
+# Copy the built binary file from the builder stage
 COPY --from=builder /app/nextinbox .
-COPY .env .env
-
+COPY doc.html doc.html
 
 # Expose the port your app listens on
 EXPOSE 8080
