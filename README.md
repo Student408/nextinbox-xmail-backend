@@ -1,4 +1,4 @@
-# GoMail Backend
+# NextInBox Backend
 
 ## Prerequisites
 
