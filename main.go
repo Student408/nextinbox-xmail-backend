@@ -478,6 +478,19 @@ func main() {
 	// Health check endpoint
 	r.HandleFunc("/health", mailService.HealthCheckHandler).Methods("GET")
 
+	// Home route with HTML welcome page
+	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		htmlContent, err := os.ReadFile("doc.html")
+		if err != nil {
+			http.Error(w, "Failed to load welcome page", http.StatusInternalServerError)
+			return
+		}
+		w.Write(htmlContent)
+	})
+	
+
+
 	c := cors.New(cors.Options{
 		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},
 		AllowCredentials: true,

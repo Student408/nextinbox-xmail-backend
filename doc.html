@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NextInBox API Documentation</title>
+    <style>
+        :root {
+            --primary-color: #FF6C37;
+            --secondary-color: #1C1C1C;
+            --text-color: #212121;
+            --code-bg: #F8F8F8;
+            --border-color: #E8E8E8;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+            background-color: #FFFFFF;
+            color: var(--text-color);
+        }
+
+        header {
+            background: var(--secondary-color);
+            padding: 1.5rem 0;
+            border-bottom: 4px solid var(--primary-color);
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+
+        .sidebar {
+            position: fixed;
+            width: 250px;
+            height: 100vh;
+            background: #FAFAFA;
+            padding: 2rem;
+            border-right: 1px solid var(--border-color);
+            overflow-y: auto;
+        }
+
+        .main-content {
+            margin-left: 300px;
+            padding: 2rem;
+        }
+
+        .method-badge {
+            display: inline-block;
+            padding: 0.3rem 0.8rem;
+            border-radius: 4px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            color: white;
+            background: var(--primary-color);
+            margin-right: 1rem;
+        }
+
+        .endpoint {
+            background: var(--code-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 1rem;
+            margin: 1rem 0;
+        }
+
+        pre {
+            background: var(--code-bg);
+            padding: 1.5rem;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            overflow-x: auto;
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+        }
+
+        code {
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            color: var(--primary-color);
+            background: var(--code-bg);
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
+        .card {
+            background: white;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 1.5rem;
+            margin: 1rem 0;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        h1, h2, h3 {
+            color: var(--secondary-color);
+            font-weight: 600;
+        }
+
+        .nav-link {
+            display: block;
+            padding: 0.5rem 0;
+            color: var(--text-color);
+            text-decoration: none;
+            border-left: 3px solid transparent;
+            padding-left: 1rem;
+            margin: 0.5rem 0;
+        }
+
+        .nav-link:hover {
+            border-left-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+
+        .request-example {
+            background: var(--secondary-color);
+            color: white;
+            padding: 1.5rem;
+            border-radius: 6px;
+            margin: 1rem 0;
+        }
+
+        /* Mobile menu button */
+        .menu-toggle {
+            display: none;
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1000;
+            background: var(--primary-color);
+            border: none;
+            color: white;
+            padding: 0.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+            .menu-toggle {
+                display: block;
+            }
+
+            .sidebar {
+                transform: translateX(-100%);
+                transition: transform 0.3s ease;
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 80%;
+                max-width: 300px;
+                z-index: 999;
+                background: white;
+                box-shadow: 2px 0 5px rgba(0,0,0,0.1);
+            }
+
+            .sidebar.active {
+                transform: translateX(0);
+            }
+
+            .main-content {
+                margin-left: 0;
+                padding: 1rem;
+            }
+
+            .container {
+                padding: 0 1rem;
+            }
+
+            pre {
+                max-width: 100%;
+                overflow-x: auto;
+                font-size: 14px;
+            }
+
+            .endpoint {
+                padding: 0.75rem;
+            }
+
+            .method-badge {
+                display: block;
+                margin-bottom: 0.5rem;
+                width: fit-content;
+            }
+
+            /* Overlay when mobile menu is open */
+            .overlay {
+                display: none;
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: rgba(0,0,0,0.5);
+                z-index: 998;
+            }
+
+            .overlay.active {
+                display: block;
+            }
+        }
+
+        /* Improved touch targets for mobile */
+        @media (max-width: 768px) {
+            .nav-link {
+                padding: 0.75rem 1rem;
+                margin: 0.25rem 0;
+            }
+
+            button, 
+            a {
+                min-height: 44px;
+                min-width: 44px;
+            }
+
+            pre {
+                -webkit-overflow-scrolling: touch;
+            }
+
+            code {
+                word-break: break-word;
+            }
+        }
+
+        /* Font size adjustments for better readability */
+        @media (max-width: 480px) {
+            body {
+                font-size: 16px;
+            }
+
+            h1 {
+                font-size: 1.75rem;
+            }
+
+            h2 {
+                font-size: 1.5rem;
+            }
+
+            h3 {
+                font-size: 1.25rem;
+            }
+
+            .request-example {
+                font-size: 14px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1 style="color: white; margin: 0;">NextInBox API Documentation</h1>
+        </div>
+    </header>
+
+    <!-- Add mobile menu button -->
+    <button class="menu-toggle" aria-label="Toggle navigation">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="12" x2="21" y2="12"></line>
+            <line x1="3" y1="6" x2="21" y2="6"></line>
+            <line x1="3" y1="18" x2="21" y2="18"></line>
+        </svg>
+    </button>
+
+    <!-- Add overlay div -->
+    <div class="overlay"></div>
+
+    <div class="sidebar">
+        <nav>
+            <a href="#prerequisites" class="nav-link">Prerequisites</a>
+            <a href="#installation" class="nav-link">Installation</a>
+            <a href="#api-reference" class="nav-link">API Reference</a>
+            <a href="#deployment" class="nav-link">Deployment</a>
+        </nav>
+    </div>
+
+    <div class="main-content">
+        <section id="prerequisites">
+            <h2>Prerequisites</h2>
+            <ol>
+                <li><strong>Install Go:</strong>
+                    <p>Download and install Go from the official website: <a href="https://golang.org/dl/" target="_blank">https://golang.org/dl/</a></p>
+                </li>
+                <li><strong>Install Docker:</strong>
+                    <p>Download and install Docker from the official website: <a href="https://www.docker.com/get-started" target="_blank">https://www.docker.com/get-started</a></p>
+                </li>
+                <li><strong>Set up environment variables:</strong>
+                    <p>Create a <code>.env</code> file in the project root directory with the following content:</p>
+                    <pre><code>SUPABASE_PROJECT_REF=
+SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+PORT=8080</code></pre>
+                </li>
+            </ol>
+        </section>
+
+        <section id="installation">
+            <h2>Initialize the Go Project</h2>
+            <p>Run the following commands to initialize the Go module and install dependencies:</p>
+            <pre><code>go mod init nextinbox
+go mod tidy
+go get github.com/gorilla/mux github.com/joho/godotenv github.com/lengzuo/supa github.com/rs/cors golang.org/x/time/rate</code></pre>
+        </section>
+
+        <section>
+            <h2>Build and Run Locally</h2>
+            <ol>
+                <li><strong>Build the application:</strong>
+                    <pre><code>go build -o main .</code></pre>
+                </li>
+                <li><strong>Run the application:</strong>
+                    <pre><code>./main</code></pre>
+                </li>
+                <li><strong>Test the application:</strong>
+                    <p>Access <a href="http://localhost:8080/health" target="_blank">http://localhost:8080/health</a> in your browser or use a tool like <code>curl</code>:</p>
+                    <pre><code>curl http://localhost:8080/health</code></pre>
+                </li>
+            </ol>
+        </section>
+
+        <section id="api-reference">
+            <h2>API Reference</h2>
+            
+            <div class="endpoint">
+                <span class="method-badge">GET</span>
+                <code>/health</code>
+                <p>Check if the API is running.</p>
+            </div>
+
+            <div class="endpoint">
+                <span class="method-badge">POST</span>
+                <code>/api/v1/send</code>
+                <p>Send an email using a template.</p>
+                
+                <div class="request-example">
+                    <h4>Request Body:</h4>
+                    <pre><code>{
+    "user_key": "nib_user_example_key",
+    "service_id": "12345-service",
+    "template_id": "template-67890",
+    "recipients": [
+        {
+            "email_address": "user@example.com",
+            "name": "Alice"
+        }
+    ],
+    "parameters": {
+        "customer_name": "Alice",
+        "incentive": "10% off",
+        "expiration_date": "2023-12-31"
+    }
+}</code></pre>
+                </div>
+            </div>
+        </section>
+
+        <section id="deployment">
+            <h2>Docker Instructions</h2>
+            <ol>
+                <li><strong>Build the Docker image:</strong>
+                    <pre><code>docker build -t nextinbox .</code></pre>
+                </li>
+                <li><strong>Push the Docker image to Docker Hub:</strong>
+                    <pre><code>docker login
+docker push your_dockerhub_username/nextinbox:latest</code></pre>
+                </li>
+                <li><strong>Run the Docker container locally:</strong>
+                    <pre><code>docker run -p 8080:8080 nextinbox</code></pre>
+                </li>
+            </ol>
+        </section>
+
+        <section>
+            <h2>Deploying on Koyeb Using Docker Image</h2>
+            <ol>
+                <li><strong>Log in to Koyeb:</strong>
+                    <p>Visit <a href="https://www.koyeb.com/" target="_blank">Koyeb's website</a> and log in to your account.</p>
+                </li>
+                <li><strong>Create a New App:</strong>
+                    <p>In the Koyeb dashboard, click on <strong>Create App</strong>.</p>
+                </li>
+                <li><strong>Configure App Deployment:</strong>
+                    <p>Select <strong>Docker Hub</strong> as the deployment source. Enter your Docker image name, e.g., <code>your_dockerhub_username/nextinbox:latest</code>.</p>
+                </li>
+                <li><strong>Deploy the App:</strong>
+                    <p>Click on <strong>Deploy</strong> to start the deployment process.</p>
+                </li>
+                <li><strong>Access the Application:</strong>
+                    <p>Once deployed, Koyeb will provide you with a URL to access your application. Use this URL to test the application.</p>
+                </li>
+                <li><strong>Test Health Endpoint:</strong>
+                    <p>Verify that the application is running by accessing the <code>/health</code> endpoint in your browser or using <code>curl</code>:</p>
+                    <pre><code>curl &lt;your-koyeb-app-url&gt;/health</code></pre>
+                </li>
+            </ol>
+        </section>
+    </div>
+
+    <footer>
+        <p>&copy; 2024 NextInBox. All rights reserved.</p>
+    </footer>
+
+    <script>
+        // Mobile menu functionality
+        const menuToggle = document.querySelector('.menu-toggle');
+        const sidebar = document.querySelector('.sidebar');
+        const overlay = document.querySelector('.overlay');
+        const navLinks = document.querySelectorAll('.nav-link');
+
+        function toggleMenu() {
+            sidebar.classList.toggle('active');
+            overlay.classList.toggle('active');
+            document.body.style.overflow = sidebar.classList.contains('active') ? 'hidden' : '';
+        }
+
+        menuToggle.addEventListener('click', toggleMenu);
+        overlay.addEventListener('click', toggleMenu);
+
+        // Close menu when nav link is clicked
+        navLinks.forEach(link => {
+            link.addEventListener('click', () => {
+                if (sidebar.classList.contains('active')) {
+                    toggleMenu();
+                }
+            });
+        });
+
+        // Handle resize events
+        window.addEventListener('resize', () => {
+            if (window.innerWidth > 768) {
+                sidebar.classList.remove('active');
+                overlay.classList.remove('active');
+                document.body.style.overflow = '';
+            }
+        });
+    </script>
+</body>
+</html>
